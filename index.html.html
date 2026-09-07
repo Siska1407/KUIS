@@ -975,6 +975,9 @@
                 <button class="btn btn-success btn-block mt-8" id="addQuestionBtn">
                     <i class="fas fa-plus-circle"></i> Tambah Soal Baru
                 </button>
+                <button class="btn btn-primary btn-block mt-8" id="publishQuestionsBtn">
+                    <i class="fas fa-cloud-upload-alt"></i> Publish Soal dan Mulai Respons Baru
+                </button>
                 <div class="divider"></div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                     <button class="btn btn-outline btn-sm" id="resetDefaultQuestionsBtn">
@@ -1039,6 +1042,7 @@
 
         // keys
         const STORAGE_QUESTIONS = 'quiz_questions';
+        const STORAGE_DRAFT_QUESTIONS = 'quiz_questions_draft';
         const STORAGE_LEADERBOARD = 'quiz_leaderboard';
 
         // ----- helpers -----
@@ -1055,6 +1059,39 @@
 
         function saveQuestions(qs) {
             localStorage.setItem(STORAGE_QUESTIONS, JSON.stringify(qs));
+        }
+
+        function loadDraftQuestions() {
+            try {
+                const raw = localStorage.getItem(STORAGE_DRAFT_QUESTIONS);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed)) return parsed;
+                }
+            } catch (_) { /* ignore */ }
+            return loadQuestions();
+        }
+
+        function saveDraftQuestions(qs) {
+            localStorage.setItem(STORAGE_DRAFT_QUESTIONS, JSON.stringify(qs));
+        }
+
+        function publishQuestions() {
+            const draft = loadDraftQuestions();
+            if (!draft.length) {
+                showToast('⚠️ Tambahkan minimal satu soal sebelum publish.');
+                return;
+            }
+            if (!confirm('Publish perubahan soal? Leaderboard dan data respons lama akan dikosongkan.')) return;
+
+            saveQuestions(draft);
+            saveLeaderboard([]);
+            state.questions = loadQuestions();
+            state.leaderboard = [];
+            localStorage.setItem('_quiz_publish_trigger', Date.now().toString());
+            renderAdminQuestions();
+            renderAdminData();
+            showToast('✅ Soal berhasil dipublish. Data respons baru dimulai.');
         }
 
         function loadLeaderboard() {
@@ -1492,7 +1529,7 @@
 
         // ----- render questions editor -----
         function renderAdminQuestions() {
-            const qs = loadQuestions();
+            const qs = loadDraftQuestions();
             const container = $('#questionEditorList');
             if (!qs.length) {
                 container.innerHTML = `
@@ -1538,22 +1575,22 @@
             // event listeners for editing
             container.querySelectorAll('.edit-question-text').forEach((inp, idx) => {
                 inp.addEventListener('input', () => {
-                    const qs = loadQuestions();
+                    const qs = loadDraftQuestions();
                     if (qs[idx]) { qs[idx].question = inp.value;
-                        saveQuestions(qs); }
+                        saveDraftQuestions(qs); }
                 });
             });
 
             container.querySelectorAll('.edit-option').forEach((inp) => {
                 inp.addEventListener('input', () => {
-                    const qs = loadQuestions();
+                    const qs = loadDraftQuestions();
                     const parent = inp.closest('.question-editor-item');
                     const qid = parseInt(parent.dataset.qid);
                     const q = qs.find(q => q.id === qid);
                     if (q) {
                         const oi = parseInt(inp.dataset.optidx);
                         q.options[oi] = inp.value;
-                        saveQuestions(qs);
+                        saveDraftQuestions(qs);
                         // update answer select options
                         updateAnswerSelect(parent, q);
                     }
@@ -1562,13 +1599,13 @@
 
             container.querySelectorAll('.edit-answer').forEach((sel) => {
                 sel.addEventListener('change', () => {
-                    const qs = loadQuestions();
+                    const qs = loadDraftQuestions();
                     const parent = sel.closest('.question-editor-item');
                     const qid = parseInt(parent.dataset.qid);
                     const q = qs.find(q => q.id === qid);
                     if (q) {
                         q.answer = parseInt(sel.value);
-                        saveQuestions(qs);
+                        saveDraftQuestions(qs);
                     }
                 });
             });
@@ -1578,9 +1615,9 @@
                 btn.addEventListener('click', () => {
                     const id = parseInt(btn.dataset.id);
                     if (confirm('Hapus soal ini?')) {
-                        let qs = loadQuestions();
+                        let qs = loadDraftQuestions();
                         qs = qs.filter(q => q.id !== id);
-                        saveQuestions(qs);
+                        saveDraftQuestions(qs);
                         renderAdminQuestions();
                         showToast('🗑️ Soal dihapus');
                     }
@@ -1599,7 +1636,7 @@
 
         // add question
         $('#addQuestionBtn').addEventListener('click', () => {
-            const qs = loadQuestions();
+            const qs = loadDraftQuestions();
             const newQ = {
                 id: genId(),
                 question: 'Soal baru...',
@@ -1607,7 +1644,7 @@
                 answer: 0
             };
             qs.push(newQ);
-            saveQuestions(qs);
+            saveDraftQuestions(qs);
             renderAdminQuestions();
             showToast('✅ Soal baru ditambahkan');
             // scroll to bottom
@@ -1615,12 +1652,14 @@
             list.scrollTop = list.scrollHeight;
         });
 
+        $('#publishQuestionsBtn').addEventListener('click', publishQuestions);
+
         // reset default
         $('#resetDefaultQuestionsBtn').addEventListener('click', () => {
-            if (confirm('Reset semua soal ke default? Data leaderboard tetap tersimpan.')) {
-                saveQuestions(JSON.parse(JSON.stringify(DEFAULT_QUESTIONS)));
+            if (confirm('Reset draft soal ke default? Klik Publish untuk menerapkannya.')) {
+                saveDraftQuestions(JSON.parse(JSON.stringify(DEFAULT_QUESTIONS)));
                 renderAdminQuestions();
-                showToast('🔄 Soal direset ke default');
+                showToast('🔄 Draft soal direset ke default.');
             }
         });
 
@@ -1629,6 +1668,7 @@
             if (confirm('⚠️ Hapus SEMUA data (soal + leaderboard)? Ini tidak bisa dibatalkan!')) {
                 if (confirm('Yakin sekali?')) {
                     localStorage.removeItem(STORAGE_QUESTIONS);
+                    localStorage.removeItem(STORAGE_DRAFT_QUESTIONS);
                     localStorage.removeItem(STORAGE_LEADERBOARD);
                     state.questions = loadQuestions();
                     state.leaderboard = loadLeaderboard();
@@ -1717,6 +1757,16 @@
                     }
                 }
             }
+            if (e.key === '_quiz_publish_trigger') {
+                state.questions = loadQuestions();
+                state.leaderboard = loadLeaderboard();
+                if (screens.leaderboard.classList.contains('active')) renderLeaderboard();
+                if (screens.admin.classList.contains('active')) {
+                    renderAdminQuestions();
+                    renderAdminData();
+                }
+                showToast('📢 Soal baru dipublish dan data respons direset.');
+            }
         });
 
         // ================================================================
@@ -1726,6 +1776,9 @@
         // ensure default questions exist
         if (!localStorage.getItem(STORAGE_QUESTIONS)) {
             saveQuestions(JSON.parse(JSON.stringify(DEFAULT_QUESTIONS)));
+        }
+        if (!localStorage.getItem(STORAGE_DRAFT_QUESTIONS)) {
+            saveDraftQuestions(loadQuestions());
         }
         state.questions = loadQuestions();
         state.leaderboard = loadLeaderboard();
